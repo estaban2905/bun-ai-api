@@ -11,25 +11,32 @@ const services: AIService[] = [
 
 let currentServiceIndex = 0
 
-function getNextService() {
-  const service = services[currentServiceIndex]
-  currentServiceIndex = (currentServiceIndex + 1) % services.length
-  return service;
-} 
-
 const server = Bun.serve({
   port: process.env.PORT ?? 3000,
   async fetch(req) {
     const { pathname } = new URL(req.url)
 
     if (req.method === 'POST' && pathname === '/chat') {
-      const { messages } = await req.json() as { messages: ChatMessage[] };
+      let body: { messages?: ChatMessage[] };
+      try {
+        body = await req.json() as { messages?: ChatMessage[] };
+      } catch {
+        return new Response("Invalid JSON", { status: 400 });
+      }
 
+      const { messages } = body;
+
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return new Response("messages must be a non-empty array", { status: 400 });
+      }
+
+      const startIndex = currentServiceIndex;
       for (let i = 0; i < services.length; i++) {
-        const service = getNextService();
-        console.log(`Using service: ${service?.name}`)
+        const service = services[(startIndex + i) % services.length]!;
+        currentServiceIndex = (startIndex + i + 1) % services.length;
+        console.log(`[${new Date().toISOString()}] Using service: ${service.name}`);
         try {
-          const stream = await service?.chat(messages)
+          const stream = await service.chat(messages);
           return new Response(stream, {
             headers: {
               'Content-Type': 'text/event-stream',
@@ -38,7 +45,7 @@ const server = Bun.serve({
             },
           });
         } catch (err: any) {
-          console.error(`Service ${service?.name} failed: ${err?.message ?? err}`)
+          console.error(`[${new Date().toISOString()}] Service ${service.name} failed: ${err?.message ?? err}`);
         }
       }
 
